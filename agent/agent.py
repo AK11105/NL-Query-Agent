@@ -29,6 +29,7 @@ _TOOL_SCHEMA = [{
                 "time":           {"type": "object", "description": "{type: last_n_years, value: int}"},
                 "rank_by":        {"type": "string", "description": "Metric to sort results by"},
                 "rank_ascending": {"type": "boolean","description": "Sort ascending if true"},
+                "limit":          {"type": "integer", "description": "Max rows to return (default 50). Use when user says 'top N' or 'show N'."},
             },
             "required": ["metrics", "conditions", "intent"],
         },
@@ -49,13 +50,24 @@ _QUALITATIVE = re.compile(
 )
 _HAS_NUMBER = re.compile(r'[><=!]=?\s*\d+|\d+\s*%')
 
+def _condition_has_number(user_msg: str, metric: str) -> bool:
+    """Return True if the user explicitly gave a numeric threshold for this metric."""
+    # Look for the metric name followed (nearby) by a comparison+number, or vice versa
+    pattern = re.compile(
+        rf'(?:{re.escape(metric)}\s*[><=!]=?\s*\d+|\d+\s*%?\s*[><=!]=?\s*{re.escape(metric)})',
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(user_msg)) or bool(_HAS_NUMBER.search(user_msg) and metric.lower() in user_msg.lower() and not _QUALITATIVE.search(user_msg))
+
 def _has_assumed_threshold(user_msg: str, conditions: list) -> bool:
-    """Return True if the user used a qualitative word but the LLM assumed a numeric threshold."""
+    """Return True if the LLM assumed a numeric threshold for any qualitative word in the query."""
     if not _QUALITATIVE.search(user_msg):
         return False
-    if _HAS_NUMBER.search(user_msg):
-        return False   # user gave a number, assumption is fine
-    return len(conditions) > 0  # LLM added a condition the user never specified numerically
+    for cond in conditions:
+        metric = cond.get("metric", "")
+        if not _condition_has_number(user_msg, metric):
+            return True  # qualitative word present, no explicit number for this metric
+    return False
 
 
 def _execute_query_tool(**kwargs) -> str:
@@ -111,8 +123,13 @@ class NLQueryAgent:
             if _has_assumed_threshold(last_user, args.get("conditions", [])):
                 # Remove the tool call from history and ask instead
                 self.history.pop()
-                metric = args["conditions"][0]["metric"]
-                assumed = args["conditions"][0]["value"]
+                # Find the first condition the user didn't explicitly number
+                assumed_cond = next(
+                    (c for c in args.get("conditions", []) if not _condition_has_number(last_user, c.get("metric", ""))),
+                    args["conditions"][0],
+                )
+                metric = assumed_cond["metric"]
+                assumed = assumed_cond["value"]
                 clarification = (
                     f'What {metric} threshold defines "{_QUALITATIVE.search(last_user).group()}"?\n'
                     f'A) > {int(assumed * 0.5)}\n'
@@ -214,8 +231,14 @@ class NLQueryAgent:
                     return self.history[-1]["content"]
                 continue
             content = msg.content or ""
+            # If tool just ran successfully with results, suppress any spurious refinement MCQ
+            if (self.last_result and self.last_result.get("row_count", 0) > 0
+                    and "Would you like to" in content and "Lower to" in content):
+                # Strip the refinement block — keep only the insight text before it
+                content = content[:content.index("Would you like to")].strip()
             self.history.append({"role": "assistant", "content": content})
-            if any(opt in content for opt in ["A)", "B)", "C)"]):
+            is_refinement_msg = "Would you like to" in content and "Lower to" in content
+            if any(opt in content for opt in ["A)", "B)", "C)"]) and not is_refinement_msg:
                 self.clarifications.append(content[:100])
                 self._log(
                     "ambiguity_detected",
@@ -436,3 +459,4 @@ def run():
             _print_final(final)
             # reset so we don't re-print on next turn unless a new query runs
             agent.last_result = None
+            agent._reasoning = []

@@ -14,11 +14,11 @@ NORMALIZE_WHEN = {
 }
 
 def should_normalize(intent: list, metric: str) -> bool:
-    pct_metrics = {"ROE", "ROCE", "net_profit_margin"}
+    pct_metrics = {"ROE", "ROCE", "ROA", "net_profit_margin", "earnings_yield"}
     if metric in pct_metrics:
         return False
     if "trend" in intent:
-        return True   # normalize trend lines for comparison
+        return False  # trend charts must show raw values to preserve signal
     if "rank" in intent or "filter" in intent:
         return True
     return False

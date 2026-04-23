@@ -31,10 +31,11 @@ def generate_code(q: dict) -> str:
     # Rank / sort
     rank_by = q.get("rank_by")
     rank_asc = q.get("rank_ascending", True)
+    limit = q.get("limit", 50)
     if rank_by:
-        lines.append(f"result = filtered.sort_values('{rank_by}', ascending={rank_asc}).head(10)")
+        lines.append(f"result = filtered.sort_values('{rank_by}', ascending={rank_asc}).head({limit})")
     else:
-        lines.append("result = filtered.head(10)")
+        lines.append(f"result = filtered.head({limit})")
 
     # Trend data (time series per company)
     intent = q.get("intent", [])
