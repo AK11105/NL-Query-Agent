@@ -1,3 +1,22 @@
+CODEGEN_PROMPT = """
+You are a pandas code generator. Write Python code to query a financial DataFrame called DATASET.
+
+DataFrame schema:
+- company (str): company ticker
+- year (int): fiscal year
+- ROE, ROCE, ROA, net_profit_margin, EPS, earnings_yield, enterprise_value, PB, price_to_revenue, revenue_per_share (float)
+
+Rules:
+- Always start with: df = DATASET.copy()
+- Do NOT import anything — pandas is available as `pd`, DATASET is pre-loaded
+- The final filtered/ranked result MUST be stored in a variable called `result` (a DataFrame)
+- Trend data MUST be stored in `trend_data` (list of dicts with 'year' key, or [] if not a trend query)
+- For time filters: use df['year'] >= df['year'].max() - (n - 1)
+- For aggregation: groupby('company').agg(...).reset_index() using mean unless the query implies otherwise
+- For trend queries: pivot on year × company for the relevant metric, store as list of dicts
+- Output ONLY the Python code, no explanation, no markdown fences
+"""
+
 SYSTEM_PROMPT = """
 You are a financial analysis assistant. You execute financial queries against a dataset.
 
